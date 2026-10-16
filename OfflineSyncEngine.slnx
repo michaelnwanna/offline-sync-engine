@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OfflineSync.Core/OfflineSync.Core.csproj" />
+    <Project Path="src/OfflineSync.Server/OfflineSync.Server.csproj" />
+    <Project Path="src/OfflineSync.Api/OfflineSync.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OfflineSync.Core.Tests/OfflineSync.Core.Tests.csproj" />
+    <Project Path="tests/OfflineSync.IntegrationTests/OfflineSync.IntegrationTests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+**/TestResults/
+.env
+.idea/
+.DS_Store
+**/local.properties
+**/.gradle/
+**/build/
+*.user
+*.suo
+*.jks
+*.keystore

@@ -1,0 +1,38 @@
+name: Backend Verification
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.6-alpine
+        env:
+          POSTGRES_DB: offline_sync_test
+          POSTGRES_USER: offline_sync
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U offline_sync -d offline_sync_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      SYNC_TEST_POSTGRES: Host=127.0.0.1;Database=offline_sync_test;Username=offline_sync;Password=ci-only-password
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet restore OfflineSyncEngine.slnx
+      - run: dotnet build OfflineSyncEngine.slnx --configuration Release --no-restore
+      - run: dotnet test OfflineSyncEngine.slnx --configuration Release --no-build --logger trx
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-test-results
+          path: '**/TestResults/*.trx'

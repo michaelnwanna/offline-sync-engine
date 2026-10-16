@@ -1,0 +1,34 @@
+{
+  "mutationHash": "26404e50a32d29208c03a9ee1e6bd14879d21adfeb6c2ecb0c3205622a4cb2e7",
+  "pushRequest": {
+    "protocolVersion": 1,
+    "replicaId": "11111111-1111-4111-8111-111111111111",
+    "mutations": [{
+      "protocolVersion": 1,
+      "replicaId": "11111111-1111-4111-8111-111111111111",
+      "mutationId": "22222222-2222-4222-8222-222222222222",
+      "localSequence": 1000000000000,
+      "entityId": "33333333-3333-4333-8333-333333333333",
+      "delta": {
+        "registers": {
+          "completed": { "value": false, "stamp": { "physicalMs": 1700000000000, "logical": 2, "replicaId": "11111111-1111-4111-8111-111111111111" } },
+          "title": { "value": "buy <tea> & caf\u00e9", "stamp": { "physicalMs": 1700000000000, "logical": 3, "replicaId": "11111111-1111-4111-8111-111111111111" } }
+        },
+        "counters": { "quantity": { "positive": { "11111111-1111-4111-8111-111111111111": 1000000000000 }, "negative": { "11111111-1111-4111-8111-111111111111": 2 } } },
+        "sets": { "tags": { "adds": { "22222222-2222-4222-8222-222222222222": "urgent" }, "removes": [] } },
+        "deleted": false
+      }
+    }]
+  },
+  "pushResponse": {
+    "acknowledgments": [
+      { "mutationId": "22222222-2222-4222-8222-222222222222", "status": "SYNCED", "revision": 9007199254740993, "state": { "registers": {}, "counters": {}, "sets": {}, "deleted": true } },
+      { "mutationId": "44444444-4444-4444-8444-444444444444", "status": "REJECTED", "errorCode": "CLOCK_SKEW" }
+    ]
+  },
+  "pullResponse": {
+    "changes": [{ "revision": 9007199254740993, "entityId": "33333333-3333-4333-8333-333333333333", "delta": { "registers": {}, "counters": {}, "sets": {}, "deleted": true } }],
+    "nextCursor": "opaque-server-signed-cursor",
+    "hasMore": false
+  }
+}

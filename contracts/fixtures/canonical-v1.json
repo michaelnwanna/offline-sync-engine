@@ -1,0 +1,10 @@
+[
+  {
+    "value": {"z": 9007199254740993, "a": "buy <tea> & caf\u00e9"},
+    "canonical": "{\"a\":\"buy \\u003Ctea\\u003E \\u0026 caf\\u00E9\",\"z\":9007199254740993}"
+  },
+  {
+    "value": {"text": "\"' + ` \\ / \b\t\n\f\r \u0000 \u007f \ud83d\ude00", "array": [3, 1, false, null]},
+    "canonical": "{\"array\":[3,1,false,null],\"text\":\"\\u0022\\u0027 \\u002B \\u0060 \\\\ / \\b\\t\\n\\f\\r \\u0000 \\u007F \\uD83D\\uDE00\"}"
+  }
+]

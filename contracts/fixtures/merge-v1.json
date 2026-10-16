@@ -1,0 +1,34 @@
+{
+  "clocks": [
+    { "current": { "physicalMs": 100, "logical": 5, "replicaId": "a" }, "nowMs": 50, "expected": { "physicalMs": 100, "logical": 6, "replicaId": "a" } },
+    { "current": { "physicalMs": 100, "logical": 5, "replicaId": "a" }, "received": { "physicalMs": 200, "logical": 7, "replicaId": "b" }, "nowMs": 50, "expected": { "physicalMs": 200, "logical": 8, "replicaId": "a" } },
+    { "current": { "physicalMs": 100, "logical": 5, "replicaId": "a" }, "received": { "physicalMs": 100, "logical": 9, "replicaId": "b" }, "nowMs": 50, "expected": { "physicalMs": 100, "logical": 10, "replicaId": "a" } },
+    { "current": { "physicalMs": 100, "logical": 5, "replicaId": "a" }, "nowMs": 300, "expected": { "physicalMs": 300, "logical": 0, "replicaId": "a" } }
+  ],
+  "merges": [
+    {
+      "name": "replica tie breaker and permanent deletion",
+      "left": { "registers": { "title": { "value": "left", "stamp": { "physicalMs": 100, "logical": 0, "replicaId": "a" } } }, "deleted": true },
+      "right": { "registers": { "title": { "value": "right", "stamp": { "physicalMs": 100, "logical": 0, "replicaId": "b" } } } },
+      "expected": { "registers": { "title": { "value": "right", "stamp": { "physicalMs": 100, "logical": 0, "replicaId": "b" } } }, "deleted": true }
+    },
+    {
+      "name": "counter component maxima preserve concurrent changes",
+      "left": { "counters": { "quantity": { "positive": { "a": 5 }, "negative": { "a": 2 } } } },
+      "right": { "counters": { "quantity": { "positive": { "a": 3, "b": 4 }, "negative": {} } } },
+      "expected": { "counters": { "quantity": { "positive": { "a": 5, "b": 4 }, "negative": { "a": 2 } } } }
+    },
+    {
+      "name": "unobserved concurrent addition survives removal",
+      "left": { "sets": { "tags": { "adds": { "a:1": "urgent" }, "removes": ["a:1"] } } },
+      "right": { "sets": { "tags": { "adds": { "a:1": "urgent", "b:1": "urgent" }, "removes": [] } } },
+      "expected": { "sets": { "tags": { "adds": { "a:1": "urgent", "b:1": "urgent" }, "removes": ["a:1"] } } }
+    },
+    {
+      "name": "remove tombstone precedes its add",
+      "left": { "sets": { "tags": { "adds": {}, "removes": ["a:1"] } } },
+      "right": { "sets": { "tags": { "adds": { "a:1": "tag" }, "removes": [] } } },
+      "expected": { "sets": { "tags": { "adds": { "a:1": "tag" }, "removes": ["a:1"] } } }
+    }
+  ]
+}
