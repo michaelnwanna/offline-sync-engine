@@ -1,6 +1,14 @@
 # Resilient Offline Sync Engine
 
-Status: implementation in progress. The .NET backend and portable Kotlin core exist with shared fixture tests. Android encrypted persistence, atomic edits/outbox, fenced leases, persisted retries, authentication pause, queue states, transactional acknowledgments, confirmed-base/pending-overlay reconstruction, received-clock advancement, and atomic pull cursors are implemented. Eighteen Android 34 instrumentation tests passed locally, covering concurrency, recovery, migration, response preservation, and injected rollback failures. HTTP transport, WorkManager, terminal recovery UX, and the sample remain outstanding, along with real PostgreSQL validation and broader resilience acceptance tests. See the README for the current verification boundary.
+Status: implementation in progress. The .NET backend, portable Kotlin core, encrypted Android storage, durable queue/response processing, GZIP transport, WorkManager orchestration, and native Fieldlist sample are implemented. Live Kestrel/PostgreSQL tests have verified independent-installation convergence, immutable replay after lost acknowledgment and active-request termination, and real-worker recovery after process restart, radio reconnection, forced Doze, and reboot. See the README and interoperability guide for the exact verification boundary; this is not a production-readiness claim.
+
+## Current Delivery Checkpoint
+
+- Foundation, protocol/merge engines, backend, Android persistence, orchestration, and sample have working implementations and local test coverage. This does not mark every original phase acceptance criterion complete.
+- On 2026-10-21, forced-Doze and reboot scenarios each passed offline, checkpoint, and reconnect phases against real Kestrel/PostgreSQL. They preserved original mutation/work identity and delivered in one claim with one server revision.
+- Remaining acceptance includes simulated seven-day/10,000-mutation recovery, explicit Redis-outage/server-restart scenarios, broader resource-limit and physical-device/OEM coverage, and production authentication/TLS validation.
+- Portfolio work still includes reproducible bandwidth measurements, actual screenshots/demo assets, and verified local AAR/NuGet packaging. Backend CI is configured; only an observed hosted run can establish its status.
+- Reproduction commands and historical local results live in [development](docs/development.md) and [interoperability](docs/interoperability.md), rather than being implied by this plan.
 
 ## Goal
 
@@ -16,7 +24,7 @@ Demonstrate offline synchronization, conflict resolution, and weak-network optim
 - Versioned JSON deltas with GZIP request and response compression.
 - Native Android sample, automated tests, CI, local packaging, and a portfolio-ready README.
 - Documentation is a first-class deliverable. Maintain Mermaid end-to-end architecture and sequence diagrams in the README alongside implementation changes.
-- Publishing to the existing `michaelnwanna/offline-sync-engine` GitHub repository and updating its details and the profile README were explicitly authorized on 2026-10-16. Cloud deployment and package publishing remain outside scope.
+- No GitHub repository creation, pushing, profile editing, cloud deployment, or package publishing in this scope.
 
 ## Architecture
 
@@ -168,7 +176,7 @@ docs/
 
 ## Planned Verification Commands
 
-These commands are implementation targets, not commands already run. Android instrumentation requires a configured emulator or device; backend integration tests require a running container engine.
+These are development and acceptance commands, not a blanket claim that every command has passed. See the development and interoperability guides for recorded verification. Android instrumentation requires a configured emulator or device; backend integration tests require a dedicated real PostgreSQL connection through `SYNC_TEST_POSTGRES`.
 
 ```sh
 docker compose up -d postgres redis

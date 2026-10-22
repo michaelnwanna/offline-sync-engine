@@ -80,4 +80,24 @@ class MutationQueue(
     suspend fun resumeAfterAuthentication() {
         database.withTransaction { database.metadata().put(SyncMetadata("authenticationPaused", "false")) }
     }
+
+    suspend fun isAuthenticationPaused(): Boolean = database.metadata().get("authenticationPaused") == "true"
+
+    suspend fun nextWakeAtMs(): Long? = database.withTransaction {
+        if (isAuthenticationPaused() || isBackgroundSyncPaused()) null else database.outbox().nextWakeAtMs()
+    }
+
+    suspend fun isBackgroundSyncPaused(): Boolean = database.metadata().get("backgroundSyncPaused") == "true"
+
+    suspend fun pauseBackgroundSync() {
+        database.metadata().put(SyncMetadata("backgroundSyncPaused", "true"))
+    }
+
+    suspend fun resumeBackgroundSync() {
+        database.metadata().put(SyncMetadata("backgroundSyncPaused", "false"))
+    }
+
+    suspend fun pauseForAuthentication() {
+        database.withTransaction { database.metadata().put(SyncMetadata("authenticationPaused", "true")) }
+    }
 }

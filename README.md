@@ -2,32 +2,26 @@
 
 An offline-first synchronization SDK for Android and .NET: durable local mutations, field-level deltas, deterministic conflict resolution, and safe replay after lost acknowledgments.
 
-**Status:** implementation in progress. The .NET backend and portable Kotlin protocol/merge core are implemented. Android has encrypted Room storage, atomic local edits, immutable mutations, fenced queue leases, persisted retries, authentication pause, and transactional acknowledgment/pull application with pending-overlay reconstruction. Eighteen Android 34 instrumentation tests passed locally, including response rollback and newer-edit preservation. Durable server transaction tests require real PostgreSQL; networking/WorkManager, the sample app, and full resilience validation remain outstanding. See [PLAN.md](PLAN.md) for scope and acceptance criteria.
+**Status:** implementation in progress, with a working Android/.NET vertical slice. The backend, portable Kotlin merge core, encrypted Android persistence, GZIP transport, WorkManager orchestration, and native **Fieldlist** checklist sample are implemented. Live tests against Kestrel/PostgreSQL have verified cross-installation convergence, lost-acknowledgment replay, active-request process termination, network reconnection, and recovery after forced Doze and reboot. See [interoperability results](docs/interoperability.md) for exact assertions and limitations, and [PLAN.md](PLAN.md) for remaining acceptance work.
 
 ## End-to-End Architecture
 
-This diagram describes the target architecture, not a claim that every component is implemented.
+These components are implemented. Local verification does not establish production readiness or guaranteed background execution on every Android device.
 
 ```mermaid
 flowchart LR
-    subgraph Device[Android device - core + local persistence implemented; transport planned]
+    subgraph Device[Android device]
         UI[Checklist sample]
-        SDK[Local edit store]
-        CORE[Kotlin contracts + clocks + merge + hashes]
+        SDK[Sync SDK]
         DB[(Room + SQLCipher)]
         KEY[Android Keystore]
-        WORK[WorkManager - planned]
-        QUEUE[Mutation queue - leases + retry deadlines]
-        RESP[Response store - confirmed base + pending overlay]
+        WORK[WorkManager]
         UI -->|Local edits| SDK
-        SDK --> CORE
         SDK -->|Atomic projection + outbox| DB
         KEY -->|Wrapped database passphrase| DB
-        DB <-->|Transactional claims + lease recovery| QUEUE
-        RESP -->|Atomic state + queue or pull cursor| DB
-        WORK -.->|Claim due entity heads - planned| QUEUE
+        DB -->|Ordered pending mutations| WORK
     end
-    subgraph Backend[.NET backend - implemented, integration validation required]
+    subgraph Backend[.NET backend]
         API[Authenticated ASP.NET Core API]
         MERGE[Deterministic merge core]
         PG[(PostgreSQL)]
@@ -37,7 +31,7 @@ flowchart LR
         API -.->|Optional acceleration| CACHE
     end
     WORK -->|Gzipped field deltas / HTTPS| API
-    API -.->|Transport planned - acknowledgments + changes| RESP
+    API -->|Acknowledgments + paginated changes| SDK
 ```
 
 ## Lost-Acknowledgment Recovery
@@ -53,7 +47,7 @@ sequenceDiagram
     A->>P: Lock workspace cursor; check durable receipt
     A->>P: Commit state, change entry, and receipt atomically
     A--xC: Acknowledgment lost
-    Note over C: M remains pending across restart
+    Note over C: M remains unresolved across restart
     C->>A: Retry same M and same payload
     A->>P: Read durable receipt and compare payload hash
     P-->>A: Original acknowledgment
@@ -61,7 +55,7 @@ sequenceDiagram
     C->>C: Atomically mark M synced and preserve newer local edits
 ```
 
-Redis is a disposable cache, never the replay authority. PostgreSQL receipts survive cache expiry. Per-workspace transactional revisions, not sequence allocation alone, will establish safe pull ordering.
+Redis is a disposable cache, never the replay authority. PostgreSQL receipts survive cache expiry. Per-workspace transactional revisions, not sequence allocation alone, establish safe pull ordering.
 
 ## Development
 
@@ -74,25 +68,25 @@ dotnet test OfflineSyncEngine.slnx
 
 Tests cover merge convergence, replay-safe component semantics, strict JSON parsing, canonical hashes, signed cursors, and API smoke checks. PostgreSQL-specific tests explicitly skip unless a dedicated test connection is configured. CI supplies PostgreSQL; no passing hosted workflow is claimed before it actually runs.
 
-The portable Kotlin module requires JDK 21 and runs without an Android device:
+For Android, install JDK 21 and Android SDK 35; the SDK/sample run on API 26+. Use the checked-in Gradle wrapper:
 
 ```sh
-cd android
-./gradlew :sync-core:test
+./android/gradlew -p android :sync-core:test :sync-android:testDebugUnitTest :sample:assembleDebug
+./android/gradlew -p android :sample:installDebug
 ```
 
-Both cores consume shared merge, wire, and canonical-encoding fixtures, including Unicode escaping, signed 64-bit precision, and a common SHA-256 mutation fingerprint. These JVM tests do not verify Room, SQLCipher, Keystore, or WorkManager behavior.
+Fieldlist works locally without a connection. To sync, open connection settings, copy the installation's replica ID, and supply a server origin and a JWT bound to that replica and a shared workspace. Use distinct replica IDs on separate installations. See the [development guide](docs/development.md#fieldlist-sample) for setup and identity-binding restrictions.
 
-With an Android SDK and API 26+ emulator/device, verify encrypted local persistence separately:
+## Verification Boundary
 
-```sh
-cd android
-./gradlew :sync-android:connectedDebugAndroidTest
-```
+| Area | Locally verified | Remaining boundary |
+| --- | --- | --- |
+| Merge and wire contracts | Shared Kotlin/C# fixtures and convergence tests | Seven-day / 10,000-mutation resilience acceptance |
+| Android storage and queue | Encrypted reopen, key-failure rejection, atomic edits/responses, fenced leases and retries | Physical-device and OEM coverage |
+| Live interoperability | Independent installations converge; replay after lost acknowledgment and active-request termination has one durable effect | Production identity provider/TLS and Redis-outage acceptance |
+| Real WorkManager delivery | Process restart, radio reconnection, forced-Doze exit, and reboot recovery | No guarantee while force-stopped, during idle, before unlock, or without app execution |
 
-Instrumentation covers encrypted file reopening, ordinary SQLite/wrong-key rejection, missing or corrupt wrapped-key failure without database replacement, account isolation, durable pending edits, monotonic clocks after wall-clock rollback, and transaction rollback on outbox failure. This is not yet an end-to-end synchronizing Android SDK.
-
-Queue tests also exercise competing database handles, expired-lease recovery and stale-worker fencing, persisted retry deadlines and attempts, authentication pause/resume, per-entity blocking without stopping unrelated work, and an encrypted schema v1-to-v2 upgrade. Response tests cover `SYNCED`/terminal acknowledgments, newer pending edits, losing LWW outcomes, cursor fencing, received-clock persistence, counter replay, tombstones, and injected transaction failures. HTTP transport and background delivery are not implemented yet.
+The staged recovery tests explicitly relaunch instrumentation and use test-only credentials. They are functional emulator tests, not proof of autonomous boot delivery or real-world background timing. Full procedures and recorded results are in the [interoperability guide](docs/interoperability.md). Bandwidth measurements, screenshots, packaging verification, and the remaining resilience scenarios are still outstanding.
 
 ## Documentation
 
@@ -100,6 +94,7 @@ Queue tests also exercise competing database handles, expired-lease recovery and
 - [Architecture and correctness](docs/architecture.md): merge rules, transaction boundaries, and local projection design.
 - [Protocol v1](docs/protocol.md): immutable mutation identities, field deltas, retries, pagination, and errors.
 - [Security boundaries](docs/security.md): trust model, operational requirements, and unverified properties.
+- [Android/.NET interoperability](docs/interoperability.md): dedicated test backend, multi-installation convergence, and staged recovery tests.
 - [Implementation plan](PLAN.md): full scope, phases, acceptance tests, and deferred work.
 
 Documentation is part of the deliverable: architecture diagrams and end-to-end sequences are maintained alongside behavior changes. No measured bandwidth savings, published packages, production-readiness claims, or passing CI badges are invented.

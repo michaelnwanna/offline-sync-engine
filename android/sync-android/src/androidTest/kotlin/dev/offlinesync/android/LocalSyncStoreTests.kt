@@ -21,6 +21,26 @@ class LocalSyncStoreTests {
     private val context = ApplicationProvider.getApplicationContext<Context>()
 
     @Test
+    fun replicaAllocatedBeforeEditsAndProjectedListSurviveReopen() = runTest {
+        val account = UUID.randomUUID().toString()
+        val database = SyncDatabase.open(context, account)
+        val store = LocalSyncStore(database)
+        val replica = store.replicaId()
+        assertTrue(store.documents.first().isEmpty())
+        val entity = UUID.randomUUID().toString()
+        assertEquals(replica, store.edit(entity) { title("listed", it) }.replicaId)
+        assertEquals(entity, store.documents.first().single().entityId)
+        store.edit(entity) { DocumentDelta(deleted = true) }
+        database.close()
+        val reopened = SyncDatabase.open(context, account)
+        try {
+            val recovered = LocalSyncStore(reopened)
+            assertEquals(replica, recovered.replicaId())
+            assertTrue(recovered.documents.first().single().state.deleted)
+        } finally { reopened.close() }
+    }
+
+    @Test
     fun editsAndImmutableOutboxSurviveReopenAndClockRollback() = runTest {
         val account = UUID.randomUUID().toString()
         val entityId = UUID.randomUUID().toString()

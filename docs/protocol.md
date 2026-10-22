@@ -1,6 +1,6 @@
 # Sync Protocol v1
 
-Status: .NET contracts, merge core, and persistent endpoints are implemented; durable endpoint validation requires real PostgreSQL. The portable Kotlin core implements contracts, merge rules, validation, and fingerprints with locally tested shared fixtures. Android transport and persistence remain planned. The initial schema is the checklist schema, not an arbitrary user-defined field registry.
+Status: contracts, merge engines, persistent endpoints, and the Android transport/response pipeline are implemented. Live Android/.NET interoperability is verified within the [documented test boundary](interoperability.md). The initial schema is the checklist schema, not an arbitrary user-defined field registry.
 
 ## Identity and Wire Format
 
@@ -21,8 +21,6 @@ Every mutation contains `protocolVersion`, `replicaId`, `mutationId`, `localSequ
 ## Payload Fingerprints
 
 The server deserializes the typed mutation, serializes all protocol fields with defaults, sorts JSON object members ordinally at every level, preserves array order, and SHA-256 hashes the UTF-8 canonical JSON. Counter/set metadata has a deterministic sorted representation. Clients need not compute the hash; they must retain and resend the same mutation content. This is a server-defined typed fingerprint, not a claim of general RFC 8785 compatibility.
-
-The Kotlin core provides the same mutation fingerprint for local diagnostics and compatibility tests. Both implementations use .NET's default JSON string escaping, including uppercase `\uXXXX` escapes for non-ASCII and HTML-sensitive characters; set removal dots are sorted before hashing the typed mutation. Shared fixtures verify encoding and the full mutation hash. Arbitrary JSON numeric spellings are not normalized by this scheme, and array order remains significant outside typed set normalization.
 
 ## Push
 

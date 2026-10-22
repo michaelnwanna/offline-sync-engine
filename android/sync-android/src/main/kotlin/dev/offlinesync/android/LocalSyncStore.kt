@@ -47,6 +47,9 @@ internal interface DocumentDao {
     @Query("SELECT projected FROM sync_documents WHERE entityId = :entityId")
     fun observe(entityId: String): Flow<String?>
 
+    @Query("SELECT * FROM sync_documents ORDER BY entityId")
+    fun observeAll(): Flow<List<StoredDocument>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun put(document: StoredDocument)
 }
@@ -76,6 +79,13 @@ internal interface OutboxDao {
         ORDER BY candidate.localSequence LIMIT :limit""")
     suspend fun eligible(now: Long, limit: Int): List<OutboxEntry>
 
+    @Query("""SELECT MIN(CASE WHEN candidate.state = 'IN_FLIGHT' THEN candidate.leaseUntilMs ELSE candidate.nextAttemptMs END)
+        FROM sync_outbox AS candidate WHERE candidate.state IN ('PENDING', 'IN_FLIGHT')
+        AND NOT EXISTS (SELECT 1 FROM sync_outbox AS earlier
+            WHERE earlier.entityId = candidate.entityId AND earlier.localSequence < candidate.localSequence
+            AND earlier.state != 'SYNCED')""")
+    suspend fun nextWakeAtMs(): Long?
+
     @Query("""UPDATE sync_outbox SET state = 'IN_FLIGHT', attempts = attempts + 1,
         leaseToken = :token, leaseUntilMs = :until WHERE mutationId = :mutationId AND state = 'PENDING'""")
     suspend fun claim(mutationId: String, token: String, until: Long): Int
@@ -98,8 +108,14 @@ data class LocalEditContext(
     val mutationId: String,
 )
 
+data class LocalDocument(val entityId: String, val state: DocumentDelta)
+
 class LocalSyncStore(private val database: SyncDatabase, private val nowMs: () -> Long = System::currentTimeMillis) {
     val pendingCount: Flow<Int> = database.outbox().observePendingCount()
+
+    val documents: Flow<List<LocalDocument>> = database.documents().observeAll().map { rows ->
+        rows.map { LocalDocument(it.entityId, WireJson.format.decodeFromString<DocumentDelta>(it.projected)) }
+    }
 
     fun observeDocument(entityId: String): Flow<DocumentDelta?> = database.documents().observe(entityId).map { json ->
         json?.let { WireJson.format.decodeFromString<DocumentDelta>(it) }
@@ -108,6 +124,12 @@ class LocalSyncStore(private val database: SyncDatabase, private val nowMs: () -
     suspend fun pendingMutations(limit: Int = 100): List<Mutation> {
         require(limit in 1..100)
         return database.outbox().pending(limit).map { WireJson.format.decodeFromString<Mutation>(it.payload) }
+    }
+
+    suspend fun replicaId(): String = database.withTransaction {
+        database.metadata().get("replicaId") ?: UUID.randomUUID().toString().also {
+            database.metadata().put(SyncMetadata("replicaId", it))
+        }
     }
 
     suspend fun edit(entityId: String, delta: (LocalEditContext) -> DocumentDelta): Mutation = database.withTransaction {

@@ -17,3 +17,4 @@ dependencyResolutionManagement {
 rootProject.name = "offline-sync"
 include(":sync-core")
 include(":sync-android")
+include(":sample")

@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: offline_sync_interop
+      POSTGRES_USER: offline_sync_interop
+      POSTGRES_PASSWORD: interop-only-password
+    ports:
+      - "127.0.0.1:55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U offline_sync_interop -d offline_sync_interop"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

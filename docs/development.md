@@ -5,7 +5,7 @@
 - .NET 10 SDK (selected by the root SDK configuration).
 - Docker with Compose, or a separately managed PostgreSQL 17 database.
 - Optional Redis 7 for receipt caching. Leave its connection unset to use PostgreSQL directly.
-- The portable Kotlin core uses JDK 21 and the checked-in Gradle 8.14.3 wrapper. Android persistence/sample work additionally requires an Android SDK and emulator/device.
+- Android: JDK 21, the checked-in Gradle 8.14.3 wrapper, Android SDK 35, and an API 26+ emulator/device for instrumentation or the sample. Dependency versions are pinned in the Gradle build files.
 
 ## Start Local Infrastructure
 
@@ -58,48 +58,73 @@ Without `SYNC_TEST_POSTGRES`, durable integration tests explicitly skip. They do
 
 CI configures PostgreSQL and runs these tests with test reports. No claim of a passing hosted workflow is made until the repository is published and the workflow executes.
 
-## Portable Kotlin Core
+## Android Build and Tests
 
-From the repository root, with JDK 21 configured:
-
-```sh
-./android/gradlew -p android :sync-core:test
-```
-
-On macOS, select an installed JDK explicitly with `JAVA_HOME=$(/usr/libexec/java_home -v 21)` before the command when needed. The first run downloads Gradle and dependencies. No Android emulator or database server is needed for this module.
-
-Tests load language-neutral fixtures directly from `contracts/fixtures`: merge/clock cases, typed wire round trips, canonical JSON escaping, and an identical mutation fingerprint checked by .NET. Additional tests cover convergence, metadata ambiguity, arithmetic overflow, ownership validation, clock skew, and insertion-order-independent hashing. This does not validate encrypted Android storage or background delivery.
-
-## Android Local Storage
-
-The `sync-android` library requires API 26+, compiles against API 35, and pins Android Gradle Plugin 8.10.1, Room 2.7.2, KSP 2.2.20-2.0.3, SQLCipher community 4.10.0, and AndroidX SQLite 2.5.2. Gradle may install missing SDK packages when their licenses are already accepted.
+From the repository root:
 
 ```sh
 export ANDROID_HOME="$HOME/Library/Android/sdk"
 export JAVA_HOME=$(/usr/libexec/java_home -v 21)
-./android/gradlew -p android :sync-android:connectedDebugAndroidTest :sync-android:lintDebug
+./android/gradlew -p android --no-daemon \
+  '-Dorg.gradle.jvmargs=-Xmx768m -XX:MaxMetaspaceSize=512m' \
+  :sync-core:test :sync-android:testDebugUnitTest \
+  :sync-android:lintDebug :sample:lintDebug :sample:assembleDebug :sample:assembleDebugAndroidTest
 ```
 
-Use `adb devices` to select a running device and set `ANDROID_SERIAL` when multiple devices are connected. Eighteen instrumentation tests passed on the Pixel 8 Android 34 emulator, including storage, queue coordination, migration, acknowledgment/pull processing, and transaction rollback. Reports are generated under `android/sync-android/build/reports/androidTests/connected`.
+The exports above select macOS SDK/JDK locations; use your installed paths on other systems. Portable Kotlin tests need no emulator/database. JVM transport tests use MockWebServer and inspect actual GZIP bodies, authorization behavior, and message limits.
 
-Open `SyncDatabase` off the main thread with a stable authenticated account/workspace scope, then construct `LocalSyncStore`. Its `edit` transaction allocates the replica identity, local sequence, hybrid timestamp, and mutation UUID; callers build a field delta using `LocalEditContext`. Register edits must use the allocated stamp, tag additions the allocated mutation ID, and counters only the local replica component. The returned mutation and pending outbox payload remain immutable. `observeDocument` and `pendingCount` expose Room-backed flows. Close the database when the account store is no longer used.
+For ordinary device tests, start an API 26+ emulator and select it explicitly when multiple devices are available:
 
-The schema is exported under `sync-android/schemas`. Version 2 adds queue lease and retry metadata through an explicit, non-destructive migration from version 1. An instrumentation test creates an encrypted version-1 database from its exported schema, migrates it, validates the schema, and checks that its pending payload remains unchanged. This is a development schema, not a published SDK release. Acknowledgment/pull application uses the existing schema; transport and background scheduling are not implemented yet.
+```sh
+ANDROID_SERIAL=emulator-5554 ./android/gradlew -p android \
+  :sync-android:connectedDebugAndroidTest :sample:connectedDebugAndroidTest
+```
 
-## Queue Coordination
+Live-server tests explicitly skip unless their opt-in arguments are supplied. The [interoperability guide](interoperability.md) provides the disposable PostgreSQL/Kestrel harness and staged commands; do not run its radio, process-termination, Doze, or reboot coordinators on an everyday emulator. Staged tests must retain installation data/APKs between phases.
 
-Construct `MutationQueue` with the account's `SyncDatabase`. `claim(limit, leaseDurationMs)` transactionally recovers expired leases and claims due mutations in sequence order, selecting at most one unresolved mutation per entity. Defaults are 100 mutations and a 60-second lease; lease durations are bounded to five minutes. Each returned `MutationLease` contains the original typed mutation and a new token. Network operations must use this claim API, not the diagnostic `LocalSyncStore.pendingMutations` listing.
+Reports are under each module's `build/reports`; Android connected-test results are under `build/reports/androidTests/connected`. Heap dumps (`*.hprof`), build output, local SDK paths, keys, and credentials are not source deliverables.
 
-Report failures using `fail(lease, failure, errorCode)`. Only the current unexpired token can change an entry. Error codes must be short uppercase identifiers, not server messages or sensitive payloads. Transient failures return to `PENDING` with persisted attempts and a retry deadline: exponential backoff starts at one second, caps at one hour, and selects a random delay in the upper half of that interval. There is no retry-count eviction. Authentication failures persist an account-wide pause; call `resumeAfterAuthentication` only after credentials are refreshed. Existing in-flight operations are not cancelled by this flag.
+## Android SDK Integration
 
-`entries` is a Room-backed flow exposing state, attempts, deadlines, lease expiry, and error codes. Conflict/rejected entries remain retained and block subsequent edits to that entity; unrelated entities remain claimable. Terminal transitions rebuild the projection without terminal mutations. No manual discard or terminal recovery API is provided yet. Successful server receipts use `SyncResponseStore` rather than a direct queue-state setter. The existing `pendingCount` still counts only `PENDING`, not every unresolved entry.
+Open `SyncDatabase` off the main thread with a stable account/workspace scope. `LocalSyncStore.edit` atomically allocates the replica identity, mutation UUID, sequence, hybrid clock, projected state, and immutable outbox entry. Use the allocated stamp for register edits, mutation ID for tag additions, and only the local replica's counter components. Room-backed flows expose documents and queue state.
 
-Lease deadlines and retry times use persisted wall-clock milliseconds to survive restarts. Wall-clock rollback can delay recovery; fixed leases do not prevent an old network request from completing after expiry. Database token fencing rejects stale local failure updates, and server idempotency must handle duplicate delivery. Multi-handle concurrency is tested; separate-process contention, process kill, and WorkManager execution remain acceptance work.
+Use `MutationQueue.claim` for delivery, not the diagnostic pending-mutation listing. Claims are fenced by expiring tokens; transient failures persist attempts and jittered retry deadlines without retry-count eviction. Authentication pause is account-wide. Conflict/rejected mutations remain retained and block dependent work on their entity, not unrelated entities. No manual terminal discard/recovery API is provided yet.
 
-## Applying Server Responses
+`SyncResponseStore` acknowledges the exact leased mutation and atomically merges confirmed state with remaining pending overlays. Pull application checks the expected cursor and commits the page with its next cursor. `SYNCED` entries, receipts, history, and tombstones are retained; no garbage collection is introduced.
 
-Create `SyncResponseStore` with the same account database. Pass each `MutationAck` and its original `MutationLease` to `acknowledge`. A false result means the lease expired, was superseded, or was already resolved; no state changes occur. Leave unknown outcomes queued for replay with the original payload. Successful acknowledgments require a positive revision and authoritative state, update the confirmed base and active projection atomically, and do not change the pull cursor. Rejected/conflict receipts require an error code and no state/revision.
+Implement `SyncWorkerHost` on the application to open an account-scoped `SyncWorkerSession` containing a queue and `SyncRunner`. Supply an `HttpSyncTransport` with an injectable `SyncTokenProvider`. Use `SyncScheduler.start` for the periodic connected sweep and `requestSync` after edits and on foreground entry; queue leases, not WorkManager uniqueness alone, coordinate delivery. Resume authentication-paused work after refreshing credentials. Action-required background pauses need explicit recovery before resuming.
 
-Read `pullCursor()` before fetching a page, then call `applyPull(expectedCursor, page)`. A false result means another pull already advanced the cursor; discard the stale page and fetch from the current cursor. Pages are bounded to 100 changes and must contain increasing revisions; the store persists page changes, received clocks, revision, and next cursor in one transaction. An empty final page is allowed. Network/authentication, workspace binding, response size limits, and cursor signature trust belong to the upcoming transport layer.
+The exported Room schema includes a tested, non-destructive v1-to-v2 migration. Lease/retry deadlines use wall-clock time: clock rollback can delay recovery, and an expired network request may still reach the server. Local fencing plus durable server idempotency handles duplicate outcomes.
 
-Projection reconstruction merges only `PENDING` and `IN_FLIGHT` local deltas over the confirmed base using the existing CRDT rules. This preserves newer local edits against stale server state, not against a legitimately higher LWW timestamp. Rejected payloads remain inspectable, but dependent later mutations stay blocked until explicit recovery is implemented. `SYNCED` entries are retained; no garbage collection is introduced.
+## Fieldlist Sample
+
+```sh
+./android/gradlew -p android :sample:installDebug
+adb -s emulator-5554 shell am start -n dev.offlinesync.sample/.ChecklistActivity
+```
+
+Fieldlist supports offline create/rename/complete, quantity changes, observed tag additions/removals, permanent deletion, queue status, sync requests, and connection/credential recovery. Local edits work before a server is configured.
+
+For a normal development API:
+
+1. Start infrastructure, migrate, and run the API using the earlier sections. For emulator access, bind the development API explicitly to `http://0.0.0.0:5080` only on a trusted local network; never expose development credentials publicly.
+2. Open Fieldlist connection settings and copy that installation's replica UUID.
+3. Create a short-lived development JWT using that replica UUID and a workspace UUID. Use the same workspace but a different installation's own replica UUID for the second device.
+4. Enter `http://10.0.2.2:5080` in the debug emulator sample and paste its JWT. The token audience remains the audience configured on the API, not necessarily the URL used by Android.
+5. Make independent offline edits, reconnect, and request sync on both installations. Use the separate opt-in harness for automated assertions rather than treating a manual UI run as acceptance evidence.
+
+The normal API does not issue demo tokens. The standalone interop harness uses different test-only issuer/audience settings and port 5087; do not mix its tokens with normal development JWTs.
+
+An installation binds to the origin, issuer, subject, workspace, and replica of its first saved connection. Credential replacement must preserve that identity. Disconnect cancels scoped work and clears the active token, not local documents or the identity binding; use a separate installation for another account/server. This sample is not a general account-management product.
+
+## Recorded Verification and Remaining Work
+
+The [interoperability guide](interoperability.md) records real Kestrel/PostgreSQL runs for two independent installations, lost acknowledgment, active-request termination, process restart, radio reconnection, forced Doze, and reboot. The Doze/reboot runs passed on Android 34 on 2026-10-21. Explicit instrumentation relaunch is part of these staged tests; they do not prove autonomous boot delivery, operation while force-stopped, pre-unlock key access, or OEM behavior.
+
+Run coordinator readiness regressions without Android or Docker:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools -p test_os_recovery.py -v
+```
+
+Seven-day/10,000-mutation recovery, Redis-outage acceptance, production TLS/identity-provider checks, measured bandwidth comparisons, screenshots, and packaging verification remain outstanding. Do not infer those results from passing functional interoperability tests.
